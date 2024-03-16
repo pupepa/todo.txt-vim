@@ -29,6 +29,10 @@ function! todo#GetCurpos()
         return getpos('.')
 endfunction
 
+" Increment and Decrement The Priority.
+" TODO: Make nrformats local to buffers of type todo
+:set nf=octal,hex,alpha
+
 function! todo#PrioritizeIncrease()
     normal! 0f)h
 endfunction
@@ -51,7 +55,6 @@ endfunction
 
 function! todo#PrioritizeAddAction (priority)
     execute "normal! mq0i(".a:priority.") \<esc>`q"
-    execute "delmarks q"
 endfunction
 
 function! todo#RemovePriority()
@@ -66,22 +69,12 @@ function! todo#PrependDate()
     endif
 endfunction
 
-function todo#SaveRegisters()
-    let s:last_search=@/
-endfunction
-
-function todo#RestoreRegisters()
-    let @/=s:last_search
-endfunction
-
 function! todo#ToggleMarkAsDone(status)
-    call todo#SaveRegisters()
     if (getline(".") =~ '\C^x\s*\d\{4\}')
         :call todo#UnMarkAsDone(a:status)
     else
         :call todo#MarkAsDone(a:status)
     endif
-    call todo#RestoreRegisters()
 endfunction
 
 function! todo#FixFormat()
@@ -103,11 +96,7 @@ endfunction
 
 function! todo#MarkAsDone(status)
     call todo#CreateNewRecurrence(1)
-    if get(g:, 'TodoTxtStripDoneItemPriority', 0)
-        exec ':s/\C^(\([A-Z]\))\(.*\)/\2/e'
-    else
-        exec ':s/\C^(\([A-Z]\))\(.*\)/\2 pri:\1/e'
-    endif
+    exec ':s/\C^(\([A-Z]\))\(.*\)/\2 pri:\1/e'
     if a:status!=''
         exec 'normal! I'.a:status.' '
     endif
@@ -144,13 +133,7 @@ function! todo#RemoveCompleted()
     if exists("g:TodoTxtForceDoneName")
         let l:done=g:TodoTxtForceDoneName
     else
-        let l:currentfile=expand('%:t')
-
-        if l:currentfile =~ '[Tt]oday.txt'
-            let l:done=substitute(substitute(l:currentfile,'today','done-today',''),'Today','Done-Today','')
-        else
-            let l:done=substitute(substitute(l:currentfile,'todo','done',''),'Todo','Done','')
-        endif
+        let l:done=substitute(substitute(expand('%:t'),'todo','done',''),'Todo','Done','')
     endif
     let l:done_file = l:target_dir.'/'.l:done
     echo "Writing to ".l:done_file
@@ -164,19 +147,16 @@ function! todo#RemoveCompleted()
     call s:AppendToFile(l:done_file, l:completed)
 endfunction
 
-function! todo#Sort(type)
+function! todo#Sort()
     " vim :sort is usually stable
     " we sort first on contexts, then on projects and then on priority
-    let g:Todo_fold_char='x'
-    let oldcursor=todo#GetCurpos()
-    if(a:type != "")
-        exec ':sort /.\{-}\ze'.a:type.'/'
-    elseif expand('%')=~'[Dd]one.*.txt'
+    if expand('%')=~'[Dd]one.*.txt'
         " FIXME: Put some unit tests around this, and fix case sensitivity if ignorecase is set.
         silent! %s/\(x\s*\d\{4}\)-\(\d\{2}\)-\(\d\{2}\)/\1\2\3/g
         sort n /^x\s*/
         silent! %s/\(x\s*\d\{4}\)\(\d\{2}\)/\1-\2-/g
     else
+        let oldcursor=getpos(".")
         silent normal gg
         let l:first=search('^\s*x')
         if  l:first != 0
@@ -186,28 +166,19 @@ function! todo#Sort(type)
             let l:last=search('^\s*x','b')
             let l:diff=l:last-l:first+1
             " Cut the done lines
-            silent execute ':'.l:first.'d a '.l:diff
+            execute ':'.l:first.'d a '.l:diff
         endif
-        silent sort /@[a-zA-Z]*/ r
-        silent sort /+[a-zA-Z]*/ r
-        silent sort /\v\([A-Z]\)/ r
-        "Now tasks without priority are at beggining, move them to the end
-        silent normal gg
-        let l:firstP=search('^\s*([A-Z])', 'cn')
-        if  l:firstP > 1
-            let num=l:firstP-1
-            " Sort normal
-            silent execute ':1 d b'.num
-            silent normal G"bp
-        endif
+        sort /@[a-zA-Z]*/ r
+        sort /+[a-zA-Z]*/ r
+        sort /\v([A-Z])/ r
         if l:first != 0
             silent normal G"ap
-            silent execute ':'.l:first.','.l:last.'sort /@[a-zA-Z]*/ r'
-            silent execute ':'.l:first.','.l:last.'sort /+[a-zA-Z]*/ r'
-            silent execute ':'.l:first.','.l:last.'sort /\v([A-Z])/ r'
+            execute ':'.l:first.','.l:last.'sort /@[a-zA-Z]*/ r'
+            execute ':'.l:first.','.l:last.'sort /+[a-zA-Z]*/ r'
+            execute ':'.l:first.','.l:last.'sort /\v([A-Z])/ r'
         endif
+        call cursor(oldcursor)
     endif
-    call setpos('.', oldcursor)
 endfunction
 
 function! todo#SortDue()
@@ -297,7 +268,6 @@ function! todo#HierarchicalSort(symbol, symbolsub, dolastsort)
         "Empty buffer do nothing
         return
     endif
-    let g:Todo_fold_char=a:symbol
     "if the sort modes doesn't start by '!' it must start with a space
     let l:sortmode=Todo_txt_InsertSpaceIfNeeded(g:Todo_txt_first_level_sort_mode)
     let l:sortmodesub=Todo_txt_InsertSpaceIfNeeded(g:Todo_txt_second_level_sort_mode)
@@ -371,7 +341,7 @@ function! GetGroups(symbol,begin, end)
     let l:curline=a:begin
     let l:groups=[]
     while l:curline <= a:end
-        let l:curproj=strpart(matchstr(getline(l:curline),a:symbol.'\S*'),len(a:symbol))
+        let l:curproj=strpart(matchstr(getline(l:curline),a:symbol.'\S*'),1)
         if l:curproj != "" && index(l:groups,l:curproj) == -1
             let l:groups=add(l:groups , l:curproj)
         endif
